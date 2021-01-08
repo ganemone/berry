@@ -1,3 +1,5 @@
+const {xfs} = require(`@yarnpkg/fslib`);
+
 describe(`Commands`, () => {
   for (const [description, args] of [[`with prefix`, [`run`]], [`without prefix`, []]]) {
     describe(`run ${description}`, () => {
@@ -123,6 +125,7 @@ describe(`Commands`, () => {
         },
       ),
     );
+
     test(`it should print the list of available scripts if no parameters passed to command`,
       makeTemporaryEnv(
         {
@@ -136,6 +139,36 @@ describe(`Commands`, () => {
           expect({code, stdout, stderr}).toMatchSnapshot();
         }
       )
+    );
+
+    test(
+      `it should end child script on SIGTERM`,
+      makeTemporaryEnv({
+        scripts: {
+          sleep: `node -e "console.log('Testing script SIGTERM'); setTimeout(() => {}, 10000)"`,
+        },
+      }, async ({path, run, source}) => {
+        await run(`install`);
+
+        await xfs.writeFilePromise(`${path}/test.sh`, ([
+          `yarn sleep &`,
+          `sleep 1`,
+          `ps | grep -v "grep" | grep -q "Testing script SIGTERM" || exit 1`, // check if it was started properly
+          `kill $!`,
+          `sleep 1`,
+          `if ps | grep -v "grep" | grep -q "Testing script SIGTERM"`,
+          `then`,
+          `  echo "[FAIL] still running"; exit 1`,
+          `else`,
+          `  echo "[PASS] ok"; exit 0`,
+          `fi`,
+        ]).join(`\n`));
+
+        await expect(run(`exec`, `bash`, `test.sh`)).resolves.toMatchObject({
+          code: 0,
+          stdout: expect.stringContaining(`PASS`),
+        });
+      })
     );
   });
 });
